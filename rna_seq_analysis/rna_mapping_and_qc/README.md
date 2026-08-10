@@ -1,4 +1,4 @@
-# RNA-seq Analysis
+# RNA-seq fastp, fastqc and mapping
 
 This directory contains a streamlined, scalable pipeline for processing RNA-seq data, specifically optimized for competitive mapping across complex genomes (e.g., *Brassica* species).
 

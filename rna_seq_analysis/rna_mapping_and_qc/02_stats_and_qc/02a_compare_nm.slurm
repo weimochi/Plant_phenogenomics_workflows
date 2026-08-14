@@ -11,15 +11,14 @@ set -euo pipefail
 LC_ALL=C
 
 # ============================================================
-# NM Mismatch & Coverage Competitive Analysis
+# NM Mismatch & Coverage Multi-Genome Competitive Analysis
 # ============================================================
 # User configurable variables (passed via --export)
-GENOMES="${GENOMES:-}"         # Format: "NAME1:/path/1 NAME2:/path/2 ..."
+GENOMES="${GENOMES:-}"         # Format: "Ref1:/path/1 Ref2:/path/2 Ref3:/path/3 ..."
 OUTDIR="${OUTDIR:-}"           # Output directory for the TSV report
 MAPQ="${MAPQ:-0}"              # Minimum MAPQ filter
 THREADS="${THREADS:-2}"        # samtools threads per job
 JOBS="${JOBS:-4}"              # Parallel sample jobs (JOBS * THREADS <= SLURM_CPUS_PER_TASK)
-UNCERT_DELTA="${UNCERT_DELTA:-0.50}" # Min |delta NM%| for a definitive call
 BAM_SUFFIX="${BAM_SUFFIX:-.bam}"
 
 if [[ -z "$GENOMES" || -z "$OUTDIR" ]]; then
@@ -48,14 +47,14 @@ OUT="${OUTDIR}/${LABEL}_compare_${STAMP}.tsv"
 TMPDIR="${OUTDIR}/.nm_tmp_${STAMP}"
 mkdir -p "$TMPDIR"
 
-echo "[INFO] Genomes   : ${GENOME_ORDER[*]}"
-echo "[INFO] Output    : $OUT"
+echo "[INFO] Genomes (${N_GENOMES}) : ${GENOME_ORDER[*]}"
+echo "[INFO] Output          : $OUT"
 
 # ============================================================
 # Worker Function (Exported for parallel execution)
 # ============================================================
 process_sample() {
-  local sample="$1" mapq="$2" thr="$3" suffix="$4" uncert_delta="$5" tmpdir="$6" n_genomes="$7"
+  local sample="$1" mapq="$2" thr="$3" suffix="$4" tmpdir="$6" n_genomes="$7"
   shift 7
   local genome_order=()
   declare -A genome_dirs
@@ -87,30 +86,37 @@ process_sample() {
 
   local ROW="$sample"
   declare -A nm_val
+  local best_ref="NA"
+  local min_nm=999999
 
+  # 1. 依序對每個 Reference 計算 NM 與 Coverage
   for g in "${genome_order[@]}"; do
     local bam="${genome_dirs[$g]}/${sample}${suffix}"
     local nm; nm=$(_nm_rate "$bam")
     nm_val["$g"]="$nm"
     local stats; stats=$(_cov_stats "$bam")
     ROW+="\t${nm}\t${stats}"
+
+    # 動態尋找 NM 最低（最佳匹配）的 Reference
+    if [[ "$nm" != "NA" ]]; then
+      # 透過 awk 比較浮點數大小
+      local is_smaller
+      is_smaller=$(awk -v a="$nm" -v b="$min_nm" 'BEGIN{print (a < b) ? 1 : 0}')
+      if [[ "$is_smaller" -eq 1 ]]; then
+        min_nm="$nm"
+        best_ref="$g"
+      fi
+    fi
   done
 
-  if [[ "$n_genomes" -eq 2 ]]; then
-    local g0="${genome_order[0]}" g1="${genome_order[1]}"
-    local nm0="${nm_val[$g0]}" nm1="${nm_val[$g1]}"
-    local delta call
-    if [[ "$nm0" == "NA" || "$nm1" == "NA" ]]; then
-      delta="NA"; call="NA"
-    else
-      delta=$(awk -v a="$nm0" -v b="$nm1" 'BEGIN{ d=a-b; if(d<0)d=-d; printf "%.4f",d }')
-      call=$(awk  -v a="$nm0" -v b="$nm1" -v n0="$g0" -v n1="$g1" -v th="$uncert_delta" \
-                'BEGIN{ d=a-b; if(d<0)d=-d; print (d<th ? "uncertain" : (a<=b ? n0 : n1)) }')
-    fi
-    ROW+="\t${delta}\t${call}"
-  fi
+  # 2. 附加最佳匹配結果（Best Hit）
+  ROW+="\t${best_ref}"
 
-  for g in "${genome_order[@]}"; do ROW+="\t${genome_dirs[$g]}/${sample}${suffix}"; done
+  # 3. 附加各基因體的實際 BAM 路徑
+  for g in "${genome_order[@]}"; do 
+    ROW+="\t${genome_dirs[$g]}/${sample}${suffix}"
+  done
+
   printf '%s\n' "$ROW" > "${tmpdir}/${sample}.row"
 }
 export -f process_sample
@@ -129,11 +135,11 @@ echo "[INFO] Processing ${#SAMPLES[@]} samples..."
 # Use GNU parallel if available, otherwise fallback to background job loop
 if command -v parallel >/dev/null 2>&1 && parallel --version 2>&1 | grep -q "GNU parallel"; then
   printf '%s\n' "${SAMPLES[@]}" | parallel --jobs "$JOBS" --bar \
-    process_sample {} "$MAPQ" "$THREADS" "$BAM_SUFFIX" "$UNCERT_DELTA" "$TMPDIR" "$N_GENOMES" "${GENOME_ARGS[@]}"
+    process_sample {} "$MAPQ" "$THREADS" "$BAM_SUFFIX" "" "$TMPDIR" "$N_GENOMES" "${GENOME_ARGS[@]}"
 else
   run_count=0
   for sample in "${SAMPLES[@]}"; do
-    process_sample "$sample" "$MAPQ" "$THREADS" "$BAM_SUFFIX" "$UNCERT_DELTA" "$TMPDIR" "$N_GENOMES" "${GENOME_ARGS[@]}" &
+    process_sample "$sample" "$MAPQ" "$THREADS" "$BAM_SUFFIX" "" "$TMPDIR" "$N_GENOMES" "${GENOME_ARGS[@]}" &
     ((++run_count % JOBS == 0)) && wait
   done
   wait
@@ -141,9 +147,16 @@ fi
 
 # Assemble Header & Results
 HEADER="sample_id"
-for g in "${GENOME_ORDER[@]}"; do HEADER+="\t${g}_NM(%)\t${g}_numreads\t${g}_coverage\t${g}_meandepth\t${g}_meanmapq"; done
-[[ $N_GENOMES -eq 2 ]] && HEADER+="\tdelta_NM(%)\tcall"
-for g in "${GENOME_ORDER[@]}"; do HEADER+="\t${g}_bam"; done
+for g in "${GENOME_ORDER[@]}"; do 
+  HEADER+="\t${g}_NM(%)\t${g}_numreads\t${g}_coverage\t${g}_meandepth\t${g}_meanmapq"
+done
+
+# 支援任意 N 個基因體的總結欄位：直接輸出 Best Match
+HEADER+="\tbest_match"
+
+for g in "${GENOME_ORDER[@]}"; do 
+  HEADER+="\t${g}_bam"
+done
 
 {
   echo -e "$HEADER"

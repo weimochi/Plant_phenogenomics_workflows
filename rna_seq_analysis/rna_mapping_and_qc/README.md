@@ -130,33 +130,33 @@ sbatch --array=0-$((N-1)) \
 This module contains scripts to evaluate alignment quality, compute coverage, and resolve competitive mapping between sub-genomes.
 
 ### a. Competitive NM & Coverage Analysis (`02a_compare_nm.slurm`)
-This script evaluates sample alignments across multiple reference genomes. It extracts mismatch rates (NM) and calculates full-contig weighted coverage metrics to determine which sub-genome (e.g., AA vs. CC) best represents the sample. 
+This script evaluates sample alignments across multiple reference genomes. It extracts mismatch rates (NM) and calculates full-contig weighted coverage metrics to determine which reference genome best represents each sample (supporting N reference genomes simultaneously for sample provenance, genotype verification, or identifying hybrid/contamination backgrounds).
 
 **Usage:**
 Pass the target genomes as a space-separated string containing `NAME:DIRECTORY` pairs. 
 
 ```bash
-# Define your genomes and output directory
-export GENOMES="AA:/path/to/01_alignment/AA/bam CC:/path/to/01_alignment/CC/bam"
+# Define your genomes and output directory (supports N reference genomes)
+export GENOMES="Ref1:/path/to/alignment/Ref1/bam Ref2:/path/to/alignment/Ref2/bam Ref3:/path/to/alignment/Ref3/bam"
 export OUTDIR="/path/to/02_stats_and_qc/results"
 
 # [Optional] Adjust mapping quality thresholds or parallelization
 # export MAPQ=20
 # export JOBS=4
 # export THREADS=2
-# export UNCERT_DELTA=0.50
 
 # Submit the comparison job
 sbatch --export=ALL,GENOMES,OUTDIR 02a_compare_nm.slurm
 ```
 
 ### b. Depth & Gene-Body Coverage via Mosdepth (`02b_calc_depth.slurm`)
-To ensure that reads are appropriately enriched within target regions rather than distributed across intergenic background noise, this script utilizes `mosdepth` to calculate global mapping depth, $1\text{x}$ genome coverage, and length-weighted gene-body mean depth.
+
+To ensure that reads are appropriately enriched within target regions rather than distributed across intergenic background noise, this script utilizes `mosdepth` to calculate global mapping depth, $1\text{x}$ genome coverage, and length-weighted gene-body mean depth for a given set of BAM files.
 
 **Usage:**
 ```bash
-export BAMDIR="/path/to/01_alignment/AA/bam"
-export OUT="/path/to/output_directory/AA_depth.tsv"
+export BAMDIR="/path/to/alignment/bam"
+export OUT="/path/to/output_directory/coverage_depth_summary.tsv"
 export GENEBED="/path/to/reference/gene_body.bed"
 
 # [Optional] Adjust mapping quality threshold (default: Q=10)

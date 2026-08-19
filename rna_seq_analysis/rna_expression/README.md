@@ -79,7 +79,7 @@ This module takes the raw gene-level count matrix and performs rigorous quality 
 
 ---
 
-## Complete Preprocessing Pipeline
+### Complete Preprocessing Pipeline
 
 ```text
 Raw count matrix (Genes × Samples)
@@ -102,7 +102,7 @@ Final Output Matrices (Preprocessed vs. Feature-Selected)
 
 ---
 
-## Detailed Step-by-Step Rationale
+### Detailed Step-by-Step Rationale
 
 * **Sample Library-Size QC**:
 * **Why**: Removes unreliable samples with extremely low total assigned counts to prevent technical noise from dominating downstream correlations.
@@ -136,7 +136,7 @@ Final Output Matrices (Preprocessed vs. Feature-Selected)
 
 ---
 
-## Adjustable Command-Line Arguments
+### Adjustable Command-Line Arguments
 
 * **`--count_matrix`** (Required): Path to the raw gene count matrix.
 * **`--annotation`** (Required): Path to the gene annotation file containing length information.
@@ -152,7 +152,7 @@ Final Output Matrices (Preprocessed vs. Feature-Selected)
 
 ---
 
-## How to Explain the Feature Selection Choice to Supervisors / Reviewers
+### How to Explain the Feature Selection Choice to Supervisors / Reviewers
 
 * **For Option A (`02a` - Absolute Threshold)**:
 > "We applied an absolute median absolute deviation threshold after low-expression filtering to isolate genes with robust, predefined variability across biological samples."
@@ -165,7 +165,7 @@ Final Output Matrices (Preprocessed vs. Feature-Selected)
 
 ---
 
-## Usage Examples
+### Usage Examples
 
 ### Option A: Absolute MAD Filtering (`02a`)
 
@@ -199,4 +199,95 @@ python 02b_preprocess_and_qc.py \
     --mad_top_fraction 0.25 \
     --hue_col treatment
 
+```
+## Step 03: RNA Co-expression Network Analysis (WGCNA Pipeline) (`03_WGCNA`)
+
+This module takes the preprocessed and filtered expression matrix from Step 02, checks data reliability, calculates the optimal soft-thresholding power, and constructs a signed scale-free gene co-expression network using WGCNA. It utilizes parallel Slurm array jobs to screen multiple soft-threshold powers and module merge heights simultaneously.
+
+---
+
+### Complete WGCNA Pipeline
+
+```text
+Filtered Expression Matrix (from Step 02)
+        ↓
+1. Core Preparation & Soft-Thresholding Power Calculation (`03a_run_wgcna_core.R`)
+        ↓
+2. Parallel Parameter Screening & Module Construction (`submit_wgcna_array.sh` & `03b_run_wgcna_modules.R`)
+        ↓
+Final Outputs (Gene-module assignments, module sizes, MEs, and network models)
+
+```
+
+---
+
+### Detailed Step-by-Step Rationale
+
+1. **Step 03a: Core Preparation & Soft-Thresholding Power Calculation (`03a_run_wgcna_core.R`)**
+* **Matrix Transposition**: Automatically transposes the input matrix from `Gene × Sample` to the WGCNA-required `Sample × Gene` format.
+* **Safety Quality Control**: Runs `goodSamplesGenes` to automatically check for and remove outlier samples or zero-variance genes.
+* **Topology Analysis**: Computes scale-free topology fit indices using `pickSoftThreshold` under a `signed` network setting. It generates academic-style diagnostic plots (Scale independence $R^2$ and Mean connectivity) to help select an optimal soft-threshold power where $R^2 \ge 0.8$.
+* **Output**: Generates `datExpr_ready_for_WGCNA.rds` for downstream usage.
+
+
+2. **Step 03b: Parallel Module Identification (`03b_run_wgcna_modules.R` & `submit_wgcna_array.sh`)**
+* **Parallel Screening**: Uses Slurm array jobs (`--array=1-12`) to simultaneously test 12 combinations of user-defined soft powers and merge cut heights (`mergeCutHeight`).
+* **Robust Network Construction**: Executes `blockwiseModules` with `networkType = "signed"` and `TOMType = "signed"`, utilizing an expanded `maxBlockSize = 50000` to process large gene sets (e.g., ~44,330 genes) in a single block without artificial splitting.
+* **Key Outputs**:
+* `gene_module_assignment.tsv`: Full mapping of genes to respective color modules.
+* `module_size.tsv`: Gene count breakdown per module.
+* `module_eigengenes.tsv`: Module eigengenes (MEs) representing the expression profile of each module for trait correlation.
+* `WGCNA_net_model.rds`: Complete network model for hierarchical clustering dendrogram visualizations.
+
+
+
+
+
+---
+
+### Adjustable Command-Line Arguments & Parameters
+
+#### For Script 03a (`03a_run_wgcna_core.R`)
+
+* **`<expr_file>`** *(Required)*: Path to the filtered expression matrix (e.g., `matrix_high_variability_log_tpm.csv`).
+* **`<outdir>`** *(Required)*: Directory path to save diagnostic plots, log files, and the WGCNA-ready RDS file.
+
+#### For Script 03b (`03b_run_wgcna_modules.R`)
+
+* **`<rds_file>`** *(Required)*: Full path to `datExpr_ready_for_WGCNA.rds` generated from Step 03a.
+* **`<softPower>`** *(Required)*: Selected soft-thresholding power (e.g., `16`).
+* **`<mergeCutHeight>`** *(Required)*: Similarity threshold for merging close modules (e.g., `0.25` merges modules with correlations $> 0.75$).
+* **`<outdir>`** *(Required)*: Base output directory for module subfolders.
+
+#### For Slurm Array Script (`submit_wgcna_array.sh`)
+
+* **`POWERS`** *(Array)*: List of soft-threshold powers to test (customizable, e.g., `(14 14 16 16 18 18 20 20 22 22 24 24)`).
+* **`MERGES`** *(Array)*: Corresponding module merge cut heights to pair with each power (e.g., `(0.25 0.20 ...)`).
+
+---
+
+### How to Explain the WGCNA Approach to Supervisors / Reviewers
+
+> "We constructed a signed gene co-expression network using WGCNA on high-variability genes. After verifying scale-free topology fit across multiple soft-thresholding powers, we executed parallel blockwise module identification to group co-expressed genes into distinct modules, yielding robust module eigengenes for downstream trait-association and functional analyses."
+
+---
+
+### Usage Examples
+
+#### Step 1: Calculate Soft Threshold & Generate Diagnostic Plots
+
+```bash
+Rscript 03_WGCNA/03a_run_wgcna_core.R \
+    ../02_matrix_preprocessing/processed_output/matrix_high_variability_log_tpm.csv \
+    ./wgcna_results
+```
+
+*(Check `WGCNA_soft_threshold_diagnostic.pdf` to pick your optimal power before moving to Step 2).*
+
+#### Step 2: Run Parallel Module Identification via Slurm Array
+
+Before submitting, edit `submit_wgcna_array.sh` to update your `INPUT_RDS`, `OUT_DIR`, `SCRIPT_PATH`, and custom `POWERS`/`MERGES` arrays:
+
+```bash
+sbatch 03_WGCNA/submit_wgcna_array.sh
 ```

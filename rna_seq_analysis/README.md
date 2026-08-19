@@ -54,6 +54,6 @@ rna_seq_analysis
 │   Downstream Analysis       Downstream Analysis
 │   ├── PCA / Correlation         ├── Validation
 │   ├── WGCNA                     ├── Population Analysis
-│   ├── Differential Expression  └── GWAS
+│   ├── Differential Expression   └── GWAS
 │   └── GO / KEGG
 ```

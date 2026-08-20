@@ -17,7 +17,7 @@ rna_seq_analysis
 │   STAR / GSNAP
 │        │
 │        │  Splice-aware alignment against
-│        │  AA / CC reference genomes
+│        │  various reference genomes
 │        ▼
 │   [02_stats_and_qc]
 │        │

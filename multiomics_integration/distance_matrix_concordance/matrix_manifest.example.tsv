@@ -1,0 +1,4 @@
+name	path	format	kind	id_file	id_column
+genotype_ibs	/path/to/cohort.mdist	plink	distance	/path/to/cohort.mdist.id	1
+image_dinov2	/path/to/image_cosine.distance.tsv	labeled	distance		
+rna_expression	/path/to/rna_correlation.distance.tsv	labeled	distance		

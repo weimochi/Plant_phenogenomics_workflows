@@ -8,8 +8,6 @@ This repository collects practical workflows developed for plant phenogenomics p
 
 ### Updates & Collaboration
 
-I will be transitioning out of my current research position on October 31, 2026, and plan to dedicate more time to actively updating and improving this repository.
-
 If you have any questions, suggestions, or are interested in collaborating, feel free to reach out at **r12b42009@ntu.edu.tw**.
 
 ## Repository overview
